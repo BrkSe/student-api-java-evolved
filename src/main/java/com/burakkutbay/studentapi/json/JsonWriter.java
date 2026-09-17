@@ -1,103 +1,87 @@
 package com.burakkutbay.studentapi.json;
 
+import java.time.LocalDate;
 import java.util.Collection;
-import java.util.Date;
-import java.util.Iterator;
+import java.util.HexFormat;
 import java.util.Map;
 
-import com.burakkutbay.studentapi.util.DateUtils;
-
-/**
- * Nesneleri JSON metnine dönüştürür.
- */
+/// Nesneleri JSON metnine dönüştürür.
 public final class JsonWriter {
+
+    private static final HexFormat HEX = HexFormat.of();
 
     private JsonWriter() {
     }
 
     public static String toJson(Object value) {
-        StringBuffer sb = new StringBuffer();
+        var sb = new StringBuilder();
         write(sb, value);
         return sb.toString();
     }
 
-    private static void write(StringBuffer sb, Object value) {
-        if (value == null) {
-            sb.append("null");
-        } else if (value instanceof String) {
-            writeString(sb, (String) value);
-        } else if (value instanceof Double || value instanceof Float) {
-            double d = ((Number) value).doubleValue();
-            if (Double.isNaN(d) || Double.isInfinite(d)) {
-                sb.append("null");
-            } else {
-                sb.append(String.valueOf(d));
-            }
-        } else if (value instanceof Number) {
-            sb.append(value.toString());
-        } else if (value instanceof Boolean) {
-            sb.append(((Boolean) value).booleanValue() ? "true" : "false");
-        } else if (value instanceof Map) {
-            Map map = (Map) value;
-            sb.append('{');
-            Iterator it = map.entrySet().iterator();
-            boolean first = true;
-            while (it.hasNext()) {
-                Map.Entry entry = (Map.Entry) it.next();
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                writeString(sb, String.valueOf(entry.getKey()));
-                sb.append(':');
-                write(sb, entry.getValue());
-            }
-            sb.append('}');
-        } else if (value instanceof Collection) {
-            Collection collection = (Collection) value;
-            sb.append('[');
-            Iterator it = collection.iterator();
-            boolean first = true;
-            while (it.hasNext()) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                write(sb, it.next());
-            }
-            sb.append(']');
-        } else if (value instanceof Date) {
-            writeString(sb, DateUtils.format((Date) value));
-        } else if (value instanceof JsonSerializable) {
-            write(sb, ((JsonSerializable) value).toMap());
-        } else {
-            writeString(sb, value.toString());
+    private static void write(StringBuilder sb, Object value) {
+        switch (value) {
+            case null -> sb.append("null");
+            case String s -> writeString(sb, s);
+            case Double d when d.isNaN() || d.isInfinite() -> sb.append("null");
+            case Float f when f.isNaN() || f.isInfinite() -> sb.append("null");
+            case Double d -> sb.append(d.doubleValue());
+            case Float f -> sb.append(f.doubleValue());
+            case Number n -> sb.append(n);
+            case Boolean b -> sb.append(b.booleanValue());
+            case Map<?, ?> map -> writeMap(sb, map);
+            case Collection<?> collection -> writeCollection(sb, collection);
+            case LocalDate date -> writeString(sb, date.toString());
+            case Enum<?> constant -> writeString(sb, constant.name());
+            case JsonSerializable serializable -> write(sb, serializable.toMap());
+            default -> writeString(sb, value.toString());
         }
     }
 
-    private static void writeString(StringBuffer sb, String s) {
+    private static void writeMap(StringBuilder sb, Map<?, ?> map) {
+        sb.append('{');
+        boolean first = true;
+        for (var entry : map.entrySet()) {
+            if (!first) {
+                sb.append(',');
+            }
+            first = false;
+            writeString(sb, String.valueOf(entry.getKey()));
+            sb.append(':');
+            write(sb, entry.getValue());
+        }
+        sb.append('}');
+    }
+
+    private static void writeCollection(StringBuilder sb, Collection<?> collection) {
+        sb.append('[');
+        boolean first = true;
+        for (var item : collection) {
+            if (!first) {
+                sb.append(',');
+            }
+            first = false;
+            write(sb, item);
+        }
+        sb.append(']');
+    }
+
+    private static void writeString(StringBuilder sb, String s) {
         sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '"') {
-                sb.append("\\\"");
-            } else if (c == '\\') {
-                sb.append("\\\\");
-            } else if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else if (c < 0x20) {
-                String hex = Integer.toHexString(c);
-                sb.append("\\u");
-                for (int j = hex.length(); j < 4; j++) {
-                    sb.append('0');
+        for (char c : s.toCharArray()) {
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append("\\u").append(HEX.toHexDigits(c));
+                    } else {
+                        sb.append(c);
+                    }
                 }
-                sb.append(hex);
-            } else {
-                sb.append(c);
             }
         }
         sb.append('"');

@@ -3,7 +3,6 @@ package com.burakkutbay.studentapi.http;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -11,49 +10,41 @@ import com.burakkutbay.studentapi.repository.StudentRepository;
 import com.burakkutbay.studentapi.security.ApiKeyService;
 import com.burakkutbay.studentapi.service.CourseCatalog;
 import com.burakkutbay.studentapi.service.StudentService;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-public class ApiServer {
+public final class ApiServer implements AutoCloseable {
 
     private final HttpServer server;
-    private final ExecutorService executor;
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    public ApiServer(int port, int threads, final StudentRepository repository, final StudentService studentService,
+    public ApiServer(int port, StudentRepository repository, StudentService studentService,
                      ApiKeyService apiKeyService) throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
-        executor = Executors.newFixedThreadPool(threads);
+        // Her istek kendi sanal thread'inde: bloklayan I/O için havuz boyutu ayarlamaya gerek yok.
         server.setExecutor(executor);
 
         server.createContext(StudentHandler.CONTEXT, new StudentHandler(studentService, apiKeyService));
 
-        server.createContext("/api/health", new HttpHandler() {
-            public void handle(HttpExchange exchange) throws IOException {
-                Map body = new LinkedHashMap();
-                body.put("status", "UP");
-                body.put("students", new Integer(repository.count()));
-                HttpUtils.sendJson(exchange, 200, body);
-            }
+        server.createContext("/api/health", exchange -> {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("status", "UP");
+            body.put("students", repository.count());
+            HttpUtils.sendJson(exchange, 200, body);
         });
 
-        server.createContext("/api/courses", new HttpHandler() {
-            public void handle(HttpExchange exchange) throws IOException {
-                if (!exchange.getRequestMethod().equals("GET")) {
-                    HttpUtils.sendError(exchange, 405, "Desteklenmeyen metot", null);
-                    return;
-                }
-                HttpUtils.sendJson(exchange, 200, CourseCatalog.findAll());
+        server.createContext("/api/courses", exchange -> {
+            if (!exchange.getRequestMethod().equals("GET")) {
+                HttpUtils.sendError(exchange, 405, "Desteklenmeyen metot", null);
+                return;
             }
+            HttpUtils.sendJson(exchange, 200, CourseCatalog.findAll());
         });
 
-        server.createContext("/api/stats", new HttpHandler() {
-            public void handle(HttpExchange exchange) throws IOException {
-                try {
-                    HttpUtils.sendJson(exchange, 200, studentService.statistics());
-                } catch (RuntimeException e) {
-                    HttpUtils.sendError(exchange, 500, "İstatistik hesaplanamadı", null);
-                }
+        server.createContext("/api/stats", exchange -> {
+            try {
+                HttpUtils.sendJson(exchange, 200, studentService.statistics());
+            } catch (RuntimeException _) {
+                HttpUtils.sendError(exchange, 500, "İstatistik hesaplanamadı", null);
             }
         });
     }
@@ -62,11 +53,12 @@ public class ApiServer {
         server.start();
     }
 
-    public int getPort() {
+    public int port() {
         return server.getAddress().getPort();
     }
 
-    public void stop() {
+    @Override
+    public void close() {
         server.stop(0);
         executor.shutdown();
     }

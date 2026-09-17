@@ -1,55 +1,40 @@
 package com.burakkutbay.studentapi.security;
 
-import java.util.Random;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 
 import com.burakkutbay.studentapi.util.StringUtils;
 
-/**
- * Yazma işlemleri için X-API-Key doğrulaması yapar.
- */
-public class ApiKeyService {
+/// Yazma işlemleri için `X-API-Key` doğrulaması yapar.
+public final class ApiKeyService {
 
-    private final Random random = new Random();
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final String apiKey;
 
     public ApiKeyService(String configuredKey) {
-        if (StringUtils.isBlank(configuredKey)) {
-            this.apiKey = generateKey();
-        } else {
-            this.apiKey = configuredKey.trim();
-        }
+        this.apiKey = StringUtils.isBlank(configuredKey) ? generateKey() : configuredKey.strip();
     }
 
-    public String generateKey() {
-        byte[] bytes = new byte[24];
-        random.nextBytes(bytes);
-        StringBuffer sb = new StringBuffer();
-        for (int i = 0; i < bytes.length; i++) {
-            String hex = Integer.toHexString(bytes[i] & 0xff);
-            if (hex.length() == 1) {
-                sb.append('0');
-            }
-            sb.append(hex);
-        }
-        return sb.toString();
+    public static String generateKey() {
+        var bytes = new byte[24];
+        RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
+    /// Sabit zamanlı karşılaştırma; zamanlama saldırılarıyla anahtar tahmin edilemez.
     public boolean isValid(String providedKey) {
-        if (providedKey == null) {
-            return false;
-        }
-        return apiKey.equals(providedKey.trim());
-    }
-
-    public String getApiKey() {
-        return apiKey;
+        return providedKey != null
+                && MessageDigest.isEqual(apiKey.getBytes(UTF_8), providedKey.strip().getBytes(UTF_8));
     }
 
     public String maskedKey() {
         if (apiKey.length() <= 4) {
-            return StringUtils.repeat("*", apiKey.length());
+            return "*".repeat(apiKey.length());
         }
-        return apiKey.substring(0, 4) + StringUtils.repeat("*", apiKey.length() - 4);
+        return apiKey.substring(0, 4) + "*".repeat(apiKey.length() - 4);
     }
 }

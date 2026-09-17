@@ -1,39 +1,36 @@
 package com.burakkutbay.studentapi.scheduler;
 
 import java.io.IOException;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.burakkutbay.studentapi.repository.StudentRepository;
 
-/**
- * Depoyu belirli aralıklarla diske yazar.
- */
-public class BackupScheduler {
+/// Depoyu belirli aralıklarla diske yazar.
+public final class BackupScheduler implements AutoCloseable {
 
     private static final Logger LOG = Logger.getLogger(BackupScheduler.class.getName());
 
-    private Timer timer;
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("backup-timer").daemon().factory());
 
-    public void start(final StudentRepository repository, long periodMillis) {
-        timer = new Timer("backup-timer", true);
-        timer.scheduleAtFixedRate(new TimerTask() {
-            public void run() {
-                try {
-                    repository.flush();
-                    LOG.fine("Yedekleme tamamlandı, kayıt sayısı: " + repository.count());
-                } catch (IOException e) {
-                    LOG.log(Level.WARNING, "Yedekleme başarısız", e);
-                }
+    public void start(StudentRepository repository, Duration period) {
+        executor.scheduleAtFixedRate(() -> {
+            try {
+                repository.flush();
+                LOG.fine(() -> "Yedekleme tamamlandı, kayıt sayısı: " + repository.count());
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Yedekleme başarısız", e);
             }
-        }, periodMillis, periodMillis);
+        }, period.toMillis(), period.toMillis(), TimeUnit.MILLISECONDS);
     }
 
-    public void stop() {
-        if (timer != null) {
-            timer.cancel();
-        }
+    @Override
+    public void close() {
+        executor.shutdownNow();
     }
 }

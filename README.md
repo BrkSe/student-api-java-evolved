@@ -2,14 +2,11 @@
 
 Öğrenci, ders kaydı, not ve genel not ortalaması (GNO) yönetimi için **hiçbir framework kullanmayan** bir REST API.
 
-> ⚠️ **Bu branch bilerek eski Java alışkanlıklarıyla yazılmıştır.**
-> Raw type koleksiyonlar, `Hashtable`/`Vector`, anonim sınıflar, `SimpleDateFormat`/`Calendar`,
-> `wait`/`notify`, `Timer`, `StringBuffer`, `new Integer(...)`, `Class.newInstance()`, elle yazılmış
-> `try/finally` blokları ve `instanceof` + cast zincirleri...
->
-> Bu kod tabanı, [java.evolved](https://javaevolved.dev/tr/) desenleri ve java.evolved'un
-> [`modern-java` agent skill'i](https://javaevolved.dev/agent-plugin.html) kullanılarak
-> modernize edilmiştir. Modern sürüm için **`modernize/java-25`** branch'ine bakın.
+> ✅ **Bu branch, Java 25 LTS ile modernize edilmiş sürümdür.**
+> Eski Java 8 sürümü `main` branch'indedir. Modernizasyon [java.evolved](https://javaevolved.dev/tr/)
+> desenleri ve java.evolved'un [`modern-java` agent skill'i](https://javaevolved.dev/agent-plugin.html)
+> ile yapılmıştır. Hangi desenin nereye uygulandığı ve sonuçlar için
+> **[MODERNIZATION.md](MODERNIZATION.md)** dosyasına bakın.
 
 ## Özellikler
 
@@ -24,7 +21,7 @@
 
 ## Gereksinimler
 
-- JDK 8+
+- JDK 25+
 - Maven 3.9+
 
 ## Çalıştırma
@@ -39,7 +36,6 @@ Yapılandırma `src/main/resources/application.properties` dosyasındadır ve `-
 | Anahtar | Varsayılan | Açıklama |
 |---|---|---|
 | `server.port` | `8080` | HTTP portu |
-| `server.threads` | `10` | İstek işleyen thread sayısı |
 | `api.key` | `dev-secret-key` | Yazma işlemleri için API anahtarı (boşsa rastgele üretilir) |
 | `repository.class` | `FileStudentRepository` | Depo implementasyonu |
 | `repository.file` | `data/students.csv` | CSV veri dosyası |
@@ -81,6 +77,7 @@ curl http://localhost:8080/api/students/1/transcript
 ```bash
 mvn test                      # birim testleri
 ./scripts/smoke-test.sh       # uygulamayı başlatıp tüm uç noktaları çağırır
+java scripts/HealthCheck.java # çalışan API'ye sağlık kontrolü (Java 25 compact source file)
 ```
 
 `smoke-test.sh` çıktısı iki branch arasında davranışın korunduğunu doğrulamak için birebir karşılaştırılabilir.
