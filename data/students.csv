@@ -1,0 +1,9 @@
+id;studentNumber;firstName;lastName;email;birthDate;department;status;enrollments
+1;202300001;Ayşe;Yılmaz;ayse.yilmaz@ogrenci.edu.tr;2003-04-12;Bilgisayar Mühendisliği;ACTIVE;CENG101:2023-GUZ:AA|MATH101:2023-GUZ:BA|PHYS101:2023-GUZ:BB|CENG202:2024-BAHAR:AA|MATH201:2024-BAHAR:
+2;202300002;Mehmet;Demir;mehmet.demir@ogrenci.edu.tr;2002-11-03;Bilgisayar Mühendisliği;ACTIVE;CENG101:2023-GUZ:CC|MATH101:2023-GUZ:FF|CENG202:2024-BAHAR:CB|MATH101:2024-BAHAR:DC
+3;202300003;Zeynep;Kaya;zeynep.kaya@ogrenci.edu.tr;2004-01-25;Matematik;ACTIVE;MATH101:2023-GUZ:AA|MATH201:2024-BAHAR:AA|PHYS101:2023-GUZ:BA
+4;202300004;İsmail;Çelik;ismail.celik@ogrenci.edu.tr;2001-07-19;Fizik;GRADUATED;PHYS101:2020-GUZ:BB|PHYS210:2021-BAHAR:BA|MATH101:2020-GUZ:CB
+5;202300005;Elif;Şahin;elif.sahin@ogrenci.edu.tr;2003-09-30;Matematik;SUSPENDED;MATH101:2023-GUZ:DD|MATH201:2024-BAHAR:FD
+6;202300006;Can;Öztürk;can.ozturk@ogrenci.edu.tr;2005-02-14;Bilgisayar Mühendisliği;ACTIVE;
+7;202300007;Selin;Aydın;selin.aydin@ogrenci.edu.tr;2002-06-08;Fizik;WITHDRAWN;PHYS101:2022-GUZ:
+8;202300008;Burak;Arslan;burak.arslan@ogrenci.edu.tr;2003-12-01;Bilgisayar Mühendisliği;ACTIVE;CENG101:2023-GUZ:BA|CENG202:2024-BAHAR:BB|CENG305:2024-GUZ:AA|CENG350:2024-GUZ:
