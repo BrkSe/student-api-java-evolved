@@ -1,89 +1,64 @@
 package com.burakkutbay.studentapi.notification;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedList;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.logging.Logger;
 
-/**
- * Öğrencilere e-posta bildirimlerini arka planda gönderir.
- */
-public class NotificationService {
+/// Öğrencilere e-posta bildirimlerini sanal bir thread üzerinde arka planda gönderir.
+public final class NotificationService implements AutoCloseable {
 
     private static final Logger LOG = Logger.getLogger(NotificationService.class.getName());
+    private static final Duration SMTP_LATENCY = Duration.ofMillis(50);
 
-    private final LinkedList queue = new LinkedList();
+    public record Notification(String email, String subject, String body) {
+    }
 
-    private final List sentLog = Collections.synchronizedList(new ArrayList());
-
-    private volatile boolean running = false;
-
+    private final BlockingQueue<Notification> queue = new LinkedBlockingQueue<>();
+    private final List<String> sentLog = new CopyOnWriteArrayList<>();
     private Thread worker;
 
-    public void start() {
-        running = true;
-        worker = new Thread(new Runnable() {
-            public void run() {
-                processLoop();
-            }
-        }, "notification-worker");
-        worker.setDaemon(true);
-        worker.start();
+    public synchronized void start() {
+        if (worker == null) {
+            worker = Thread.ofVirtual().name("notification-worker").start(this::processLoop);
+        }
     }
 
     public void enqueue(String email, String subject, String body) {
-        synchronized (queue) {
-            queue.addLast(new String[] {email, subject, body});
-            queue.notifyAll();
-        }
+        queue.add(new Notification(email, subject, body));
     }
 
     private void processLoop() {
-        while (running) {
-            String[] message;
-            synchronized (queue) {
-                while (queue.isEmpty() && running) {
-                    try {
-                        queue.wait(1000);
-                    } catch (InterruptedException e) {
-                        return;
-                    }
-                }
-                if (!running) {
-                    return;
-                }
-                message = (String[]) queue.removeFirst();
+        try {
+            while (!Thread.currentThread().isInterrupted()) {
+                send(queue.take());
             }
-            send(message);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
         }
     }
 
-    private void send(String[] message) {
-        try {
-            // SMTP gecikmesini taklit et
-            Thread.sleep(50);
-        } catch (InterruptedException e) {
-            // yoksay
-        }
-        LOG.info("E-posta gönderildi -> " + message[0] + " | " + message[1]);
-        sentLog.add(message[0] + " | " + message[1]);
+    private void send(Notification notification) throws InterruptedException {
+        Thread.sleep(SMTP_LATENCY); // SMTP gecikmesini taklit et
+        LOG.info(() -> "E-posta gönderildi -> " + notification.email() + " | " + notification.subject());
+        sentLog.add(notification.email() + " | " + notification.subject());
     }
 
     public int pendingCount() {
-        synchronized (queue) {
-            return queue.size();
-        }
+        return queue.size();
     }
 
-    public List getSentLog() {
-        return sentLog;
+    public List<String> sentLog() {
+        return List.copyOf(sentLog);
     }
 
-    public void stop() {
-        running = false;
-        synchronized (queue) {
-            queue.notifyAll();
+    /// Kooperatif iptal: worker thread'i kesintiye uğratır.
+    @Override
+    public synchronized void close() {
+        if (worker != null) {
+            worker.interrupt();
         }
     }
 }

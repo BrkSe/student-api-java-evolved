@@ -1,73 +1,48 @@
 package com.burakkutbay.studentapi.repository;
 
-import java.io.IOException;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.Enumeration;
-import java.util.Hashtable;
 import java.util.List;
-import java.util.Properties;
-import java.util.Vector;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.burakkutbay.studentapi.model.Student;
-import com.burakkutbay.studentapi.util.IdGenerator;
 
 public class InMemoryStudentRepository implements StudentRepository {
 
-    protected final Hashtable students = new Hashtable();
+    private final Map<Long, Student> students = new ConcurrentHashMap<>();
+    private final AtomicLong sequence = new AtomicLong();
 
-    public InMemoryStudentRepository() {
+    @Override
+    public List<Student> findAll() {
+        return students.values().stream()
+                .sorted(Comparator.comparingLong(Student::id))
+                .toList();
     }
 
-    public void init(Properties properties) throws IOException {
-        // bellek içi depo için başlatma gerekmiyor
+    @Override
+    public Optional<Student> findById(long id) {
+        return Optional.ofNullable(students.get(id));
     }
 
-    public List findAll() {
-        Vector result = new Vector();
-        Enumeration e = students.elements();
-        while (e.hasMoreElements()) {
-            result.addElement(e.nextElement());
-        }
-        Collections.sort(result, new Comparator() {
-            public int compare(Object o1, Object o2) {
-                Student s1 = (Student) o1;
-                Student s2 = (Student) o2;
-                return s1.getId().compareTo(s2.getId());
-            }
-        });
-        return result;
+    @Override
+    public Student save(Student student) {
+        var stored = student.id() == null
+                ? student.withId(sequence.incrementAndGet())
+                : student;
+        sequence.accumulateAndGet(stored.id(), Math::max);
+        students.put(stored.id(), stored);
+        return stored;
     }
 
-    public Student findById(Long id) {
-        if (id == null) {
-            return null;
-        }
-        return (Student) students.get(id);
-    }
-
-    public synchronized Student save(Student student) {
-        if (student.getId() == null) {
-            student.setId(IdGenerator.getInstance().nextId());
-        } else {
-            IdGenerator.getInstance().ensureAbove(student.getId().longValue());
-        }
-        students.put(student.getId(), student);
-        return student;
-    }
-
-    public synchronized boolean delete(Long id) {
-        if (id == null) {
-            return false;
-        }
+    @Override
+    public boolean delete(long id) {
         return students.remove(id) != null;
     }
 
+    @Override
     public int count() {
         return students.size();
-    }
-
-    public void flush() throws IOException {
-        // bellek içi depo için kalıcılık yok
     }
 }

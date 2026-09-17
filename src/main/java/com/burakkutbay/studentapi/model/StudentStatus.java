@@ -1,12 +1,23 @@
 package com.burakkutbay.studentapi.model;
 
-/**
- * Öğrenci durum sabitleri.
- */
-public interface StudentStatus {
+import java.util.Arrays;
+import java.util.Optional;
 
-    int ACTIVE = 1;
-    int GRADUATED = 2;
-    int SUSPENDED = 3;
-    int WITHDRAWN = 4;
+/// Öğrencinin kayıt durumu.
+public enum StudentStatus {
+    ACTIVE,
+    GRADUATED,
+    SUSPENDED,
+    WITHDRAWN;
+
+    /// Büyük/küçük harf duyarsız eşleştirme; bilinmeyen etiket için boş döner.
+    public static Optional<StudentStatus> fromLabel(String label) {
+        if (label == null) {
+            return Optional.empty();
+        }
+        var normalized = label.strip();
+        return Arrays.stream(values())
+                .filter(status -> status.name().equalsIgnoreCase(normalized))
+                .findFirst();
+    }
 }

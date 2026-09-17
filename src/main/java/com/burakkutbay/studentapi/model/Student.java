@@ -1,152 +1,66 @@
 package com.burakkutbay.studentapi.model;
 
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.Iterator;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
+import java.util.SequencedMap;
 
 import com.burakkutbay.studentapi.json.JsonSerializable;
-import com.burakkutbay.studentapi.util.DateUtils;
 
-public class Student implements Serializable, JsonSerializable {
+/// Değişmez öğrenci kaydı. Güncellemeler `with…` metotlarıyla yeni bir örnek üretir.
+public record Student(
+        Long id,
+        String studentNumber,
+        String firstName,
+        String lastName,
+        String email,
+        LocalDate birthDate,
+        String department,
+        StudentStatus status,
+        List<Enrollment> enrollments) implements JsonSerializable {
 
-    private static final long serialVersionUID = 1L;
-
-    private Long id;
-    private String studentNumber;
-    private String firstName;
-    private String lastName;
-    private String email;
-    private Date birthDate;
-    private String department;
-    private int status = StudentStatus.ACTIVE;
-    private List enrollments = new ArrayList();
-
-    public Student() {
+    public Student {
+        Objects.requireNonNull(birthDate, "birthDate");
+        Objects.requireNonNull(status, "status");
+        enrollments = List.copyOf(enrollments);
     }
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getStudentNumber() {
-        return studentNumber;
-    }
-
-    public void setStudentNumber(String studentNumber) {
-        this.studentNumber = studentNumber;
-    }
-
-    public String getFirstName() {
-        return firstName;
-    }
-
-    public void setFirstName(String firstName) {
-        this.firstName = firstName;
-    }
-
-    public String getLastName() {
-        return lastName;
-    }
-
-    public void setLastName(String lastName) {
-        this.lastName = lastName;
-    }
-
-    public String getFullName() {
+    public String fullName() {
         return firstName + " " + lastName;
     }
 
-    public String getEmail() {
-        return email;
+    public int age(LocalDate today) {
+        return Period.between(birthDate, today).getYears();
     }
 
-    public void setEmail(String email) {
-        this.email = email;
+    public Student withId(long newId) {
+        return new Student(newId, studentNumber, firstName, lastName, email, birthDate, department, status, enrollments);
     }
 
-    public Date getBirthDate() {
-        return birthDate;
+    public Student withStudentNumber(String number) {
+        return new Student(id, number, firstName, lastName, email, birthDate, department, status, enrollments);
     }
 
-    public void setBirthDate(Date birthDate) {
-        this.birthDate = birthDate;
+    public Student withEnrollments(List<Enrollment> newEnrollments) {
+        return new Student(id, studentNumber, firstName, lastName, email, birthDate, department, status, newEnrollments);
     }
 
-    public String getDepartment() {
-        return department;
-    }
-
-    public void setDepartment(String department) {
-        this.department = department;
-    }
-
-    public int getStatus() {
-        return status;
-    }
-
-    public void setStatus(int status) {
-        this.status = status;
-    }
-
-    public List getEnrollments() {
-        return enrollments;
-    }
-
-    public void setEnrollments(List enrollments) {
-        this.enrollments = enrollments;
-    }
-
-    public void addEnrollment(Enrollment enrollment) {
-        enrollments.add(enrollment);
-    }
-
-    public Map toMap() {
-        Map map = new LinkedHashMap();
+    @Override
+    public SequencedMap<String, Object> toMap() {
+        var map = new LinkedHashMap<String, Object>();
         map.put("id", id);
         map.put("studentNumber", studentNumber);
         map.put("firstName", firstName);
         map.put("lastName", lastName);
-        map.put("fullName", getFullName());
+        map.put("fullName", fullName());
         map.put("email", email);
-        map.put("birthDate", DateUtils.format(birthDate));
-        map.put("age", birthDate == null ? null : new Integer(DateUtils.calculateAge(birthDate)));
+        map.put("birthDate", birthDate);
+        map.put("age", age(LocalDate.now()));
         map.put("department", department);
-        map.put("status", StudentStatusUtil.toLabel(status));
-        List enrollmentMaps = new ArrayList();
-        for (Iterator it = enrollments.iterator(); it.hasNext();) {
-            Enrollment enrollment = (Enrollment) it.next();
-            enrollmentMaps.add(enrollment.toMap());
-        }
-        map.put("enrollments", enrollmentMaps);
+        map.put("status", status.name());
+        map.put("enrollments", enrollments);
         return map;
-    }
-
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        Student other = (Student) o;
-        return id != null ? id.equals(other.id) : other.id == null;
-    }
-
-    public int hashCode() {
-        return id != null ? id.hashCode() : 0;
-    }
-
-    public String toString() {
-        return "Student{id=" + id + ", studentNumber='" + studentNumber + "', firstName='" + firstName
-                + "', lastName='" + lastName + "', email='" + email + "', birthDate=" + birthDate
-                + ", department='" + department + "', status=" + status + ", enrollments=" + enrollments + "}";
     }
 }

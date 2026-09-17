@@ -1,208 +1,172 @@
 package com.burakkutbay.studentapi.service;
 
+import static com.burakkutbay.studentapi.util.StringUtils.capitalize;
+import static com.burakkutbay.studentapi.util.StringUtils.isBlank;
+import static java.util.Objects.requireNonNullElse;
+
 import java.text.Collator;
-import java.text.ParseException;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.Year;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
+import java.util.OptionalDouble;
+import java.util.SequencedMap;
+import java.util.LinkedHashMap;
 import java.util.TreeMap;
+import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.burakkutbay.studentapi.model.Course;
 import com.burakkutbay.studentapi.model.Enrollment;
+import com.burakkutbay.studentapi.model.LetterGrade;
 import com.burakkutbay.studentapi.model.Student;
 import com.burakkutbay.studentapi.model.StudentStatus;
-import com.burakkutbay.studentapi.model.StudentStatusUtil;
 import com.burakkutbay.studentapi.notification.NotificationService;
 import com.burakkutbay.studentapi.repository.StudentRepository;
-import com.burakkutbay.studentapi.util.DateUtils;
+import com.burakkutbay.studentapi.service.ApiException.Conflict;
+import com.burakkutbay.studentapi.service.ApiException.NotFound;
+import com.burakkutbay.studentapi.service.ApiException.Validation;
+import com.burakkutbay.studentapi.util.Dates;
 import com.burakkutbay.studentapi.util.EmailValidator;
-import com.burakkutbay.studentapi.util.IdGenerator;
-import com.burakkutbay.studentapi.util.StringUtils;
+import com.burakkutbay.studentapi.util.StudentNumbers;
 
-public class StudentService {
+public final class StudentService {
 
     public static final int MIN_AGE = 16;
     public static final int MAX_CREDITS_PER_SEMESTER = 20;
 
+    private static final Pattern SEMESTER = Pattern.compile("\\d{4}-(GUZ|BAHAR|YAZ)");
+    private static final Locale TURKISH = Locale.of("tr", "TR");
+
     private final StudentRepository repository;
     private final GpaCalculator gpaCalculator;
-    private final NotificationService notificationService;
+    private final NotificationService notifications;
+    private final Clock clock;
 
-    public StudentService(StudentRepository repository, GpaCalculator gpaCalculator,
-                          NotificationService notificationService) {
+    public StudentService(StudentRepository repository, GpaCalculator gpaCalculator, NotificationService notifications) {
+        this(repository, gpaCalculator, notifications, Clock.systemDefaultZone());
+    }
+
+    public StudentService(StudentRepository repository, GpaCalculator gpaCalculator, NotificationService notifications,
+                          Clock clock) {
         this.repository = repository;
         this.gpaCalculator = gpaCalculator;
-        this.notificationService = notificationService;
+        this.notifications = notifications;
+        this.clock = clock;
     }
 
     // ------------------------------------------------------------------ sorgular
 
-    public List listStudents(String department, String statusLabel, String sortBy) {
-        int status = StudentStatusUtil.UNKNOWN;
-        if (!StringUtils.isBlank(statusLabel)) {
-            status = StudentStatusUtil.fromLabel(statusLabel);
-            if (status == StudentStatusUtil.UNKNOWN) {
-                throw new ValidationException("Geçersiz durum: " + statusLabel);
-            }
-        }
+    public List<Student> listStudents(String department, String statusLabel, String sortBy) {
+        StudentStatus status = isBlank(statusLabel)
+                ? null
+                : StudentStatus.fromLabel(statusLabel).orElseThrow(() -> new Validation("Geçersiz durum: " + statusLabel));
 
-        List all = repository.findAll();
-        List filtered = new ArrayList();
-        for (int i = 0; i < all.size(); i++) {
-            Student student = (Student) all.get(i);
-            if (!StringUtils.isBlank(department) && !department.trim().equalsIgnoreCase(student.getDepartment())) {
-                continue;
+        Comparator<Student> order = switch (isBlank(sortBy) ? "id" : sortBy) {
+            case "id" -> Comparator.comparingLong(Student::id);
+            case "name" -> {
+                var collator = Collator.getInstance(TURKISH);
+                yield Comparator.comparing(Student::lastName, collator).thenComparing(Student::firstName, collator);
             }
-            if (status != StudentStatusUtil.UNKNOWN && student.getStatus() != status) {
-                continue;
-            }
-            filtered.add(student);
-        }
+            case "gpa" -> Comparator.comparingDouble((Student s) -> gpaOf(s).orElse(-1.0)).reversed();
+            case "age" -> Comparator.comparing(Student::birthDate).reversed();
+            default -> throw new Validation("Geçersiz sıralama alanı: " + sortBy);
+        };
 
-        Comparator comparator = null;
-        if (StringUtils.isBlank(sortBy) || sortBy.equals("id")) {
-            comparator = null;
-        } else if (sortBy.equals("name")) {
-            final Collator collator = Collator.getInstance(new Locale("tr", "TR"));
-            comparator = new Comparator() {
-                public int compare(Object o1, Object o2) {
-                    Student s1 = (Student) o1;
-                    Student s2 = (Student) o2;
-                    int result = collator.compare(s1.getLastName(), s2.getLastName());
-                    if (result == 0) {
-                        result = collator.compare(s1.getFirstName(), s2.getFirstName());
-                    }
-                    return result;
-                }
-            };
-        } else if (sortBy.equals("gpa")) {
-            comparator = new Comparator() {
-                public int compare(Object o1, Object o2) {
-                    double gpa1 = gpaCalculator.calculate(((Student) o1).getEnrollments());
-                    double gpa2 = gpaCalculator.calculate(((Student) o2).getEnrollments());
-                    return Double.compare(gpa2, gpa1);
-                }
-            };
-        } else if (sortBy.equals("age")) {
-            comparator = new Comparator() {
-                public int compare(Object o1, Object o2) {
-                    Date d1 = ((Student) o1).getBirthDate();
-                    Date d2 = ((Student) o2).getBirthDate();
-                    return d2.compareTo(d1);
-                }
-            };
-        } else {
-            throw new ValidationException("Geçersiz sıralama alanı: " + sortBy);
-        }
-        if (comparator != null) {
-            Collections.sort(filtered, comparator);
-        }
-        return filtered;
+        return repository.findAll().stream()
+                .filter(s -> isBlank(department) || department.strip().equalsIgnoreCase(s.department()))
+                .filter(s -> status == null || s.status() == status)
+                .sorted(order)
+                .toList();
     }
 
-    public Student getStudent(Long id) {
-        Student student = repository.findById(id);
-        if (student == null) {
-            throw new NotFoundException("Öğrenci bulunamadı: " + id);
-        }
-        return student;
+    public Student getStudent(long id) {
+        return repository.findById(id).orElseThrow(() -> new NotFound("Öğrenci bulunamadı: " + id));
     }
 
     // ------------------------------------------------------------------ komutlar
 
-    public Student createStudent(Map body) {
-        List errors = new ArrayList();
+    public Student createStudent(Map<String, Object> body) {
+        var errors = new ArrayList<String>();
 
-        String firstName = getString(body, "firstName");
-        String lastName = getString(body, "lastName");
-        String email = getString(body, "email");
-        String birthDateText = getString(body, "birthDate");
-        String department = getString(body, "department");
-        String statusText = getString(body, "status");
+        var firstName = getString(body, "firstName");
+        var lastName = getString(body, "lastName");
+        var email = getString(body, "email");
+        var birthDateText = getString(body, "birthDate");
+        var department = getString(body, "department");
+        var statusText = getString(body, "status");
 
-        if (StringUtils.isBlank(firstName)) {
+        if (isBlank(firstName)) {
             errors.add("firstName zorunludur");
         }
-        if (StringUtils.isBlank(lastName)) {
+        if (isBlank(lastName)) {
             errors.add("lastName zorunludur");
         }
-        if (StringUtils.isBlank(email)) {
+        if (isBlank(email)) {
             errors.add("email zorunludur");
         } else if (!EmailValidator.isValid(email)) {
             errors.add("email geçersiz");
         } else if (emailInUse(email, null)) {
             errors.add("email zaten kayıtlı");
         }
-        Date birthDate = null;
-        if (StringUtils.isBlank(birthDateText)) {
+        LocalDate birthDate = null;
+        if (isBlank(birthDateText)) {
             errors.add("birthDate zorunludur");
         } else {
-            try {
-                birthDate = DateUtils.parse(birthDateText);
-                if (DateUtils.calculateAge(birthDate) < MIN_AGE) {
-                    errors.add("öğrenci en az " + MIN_AGE + " yaşında olmalıdır");
-                }
-            } catch (ParseException e) {
-                errors.add("birthDate yyyy-MM-dd formatında olmalıdır");
-            }
+            birthDate = validateBirthDate(birthDateText, errors);
         }
-        if (StringUtils.isBlank(department)) {
+        if (isBlank(department)) {
             errors.add("department zorunludur");
         }
-        int status = StudentStatus.ACTIVE;
-        if (!StringUtils.isBlank(statusText)) {
-            status = StudentStatusUtil.fromLabel(statusText);
-            if (status == StudentStatusUtil.UNKNOWN) {
+        var status = StudentStatus.ACTIVE;
+        if (!isBlank(statusText)) {
+            var parsed = StudentStatus.fromLabel(statusText);
+            if (parsed.isEmpty()) {
                 errors.add("status geçersiz");
+            } else {
+                status = parsed.get();
             }
         }
-        if (errors.size() > 0) {
-            throw new ValidationException(errors);
+        if (!errors.isEmpty()) {
+            throw new Validation(errors);
         }
 
-        Student student = new Student();
-        student.setFirstName(StringUtils.capitalize(firstName));
-        student.setLastName(StringUtils.capitalize(lastName));
-        student.setEmail(email.trim().toLowerCase());
-        student.setBirthDate(birthDate);
-        student.setDepartment(department.trim());
-        student.setStatus(status);
-
-        Student saved = repository.save(student);
-        saved.setStudentNumber(IdGenerator.studentNumber(DateUtils.currentYear(), saved.getId()));
-        notificationService.enqueue(saved.getEmail(), "Kaydınız oluşturuldu",
-                "Merhaba " + saved.getFirstName() + ", öğrenci numaranız: " + saved.getStudentNumber());
-        return saved;
+        var saved = repository.save(new Student(null, null, capitalize(firstName), capitalize(lastName),
+                email.strip().toLowerCase(Locale.ROOT), birthDate, department.strip(), status, List.of()));
+        var numbered = repository.save(saved.withStudentNumber(StudentNumbers.of(Year.now(clock), saved.id())));
+        notifications.enqueue(numbered.email(), "Kaydınız oluşturuldu",
+                "Merhaba %s, öğrenci numaranız: %s".formatted(numbered.firstName(), numbered.studentNumber()));
+        return numbered;
     }
 
-    public Student updateStudent(Long id, Map body) {
-        Student student = getStudent(id);
-        List errors = new ArrayList();
+    public Student updateStudent(long id, Map<String, Object> body) {
+        var student = getStudent(id);
+        var errors = new ArrayList<String>();
 
         String firstName = null;
         String lastName = null;
         String email = null;
-        Date birthDate = null;
+        LocalDate birthDate = null;
         String department = null;
-        int status = StudentStatusUtil.UNKNOWN;
+        StudentStatus status = null;
 
         if (body.containsKey("firstName")) {
             firstName = getString(body, "firstName");
-            if (StringUtils.isBlank(firstName)) {
+            if (isBlank(firstName)) {
                 errors.add("firstName boş olamaz");
             }
         }
         if (body.containsKey("lastName")) {
             lastName = getString(body, "lastName");
-            if (StringUtils.isBlank(lastName)) {
+            if (isBlank(lastName)) {
                 errors.add("lastName boş olamaz");
             }
         }
@@ -215,337 +179,283 @@ public class StudentService {
             }
         }
         if (body.containsKey("birthDate")) {
-            try {
-                birthDate = DateUtils.parse(getString(body, "birthDate"));
-                if (DateUtils.calculateAge(birthDate) < MIN_AGE) {
-                    errors.add("öğrenci en az " + MIN_AGE + " yaşında olmalıdır");
-                }
-            } catch (ParseException e) {
-                errors.add("birthDate yyyy-MM-dd formatında olmalıdır");
-            }
+            birthDate = validateBirthDate(getString(body, "birthDate"), errors);
         }
         if (body.containsKey("department")) {
             department = getString(body, "department");
-            if (StringUtils.isBlank(department)) {
+            if (isBlank(department)) {
                 errors.add("department boş olamaz");
             }
         }
         if (body.containsKey("status")) {
-            status = StudentStatusUtil.fromLabel(getString(body, "status"));
-            if (status == StudentStatusUtil.UNKNOWN) {
+            status = StudentStatus.fromLabel(getString(body, "status")).orElse(null);
+            if (status == null) {
                 errors.add("status geçersiz");
             }
         }
         if (!errors.isEmpty()) {
-            throw new ValidationException(errors);
+            throw new Validation(errors);
         }
 
-        int previousStatus = student.getStatus();
-        if (firstName != null) {
-            student.setFirstName(StringUtils.capitalize(firstName));
-        }
-        if (lastName != null) {
-            student.setLastName(StringUtils.capitalize(lastName));
-        }
-        if (email != null) {
-            student.setEmail(email.trim().toLowerCase());
-        }
-        if (birthDate != null) {
-            student.setBirthDate(birthDate);
-        }
-        if (department != null) {
-            student.setDepartment(department.trim());
-        }
-        if (status != StudentStatusUtil.UNKNOWN) {
-            if (status == StudentStatus.GRADUATED && previousStatus != StudentStatus.GRADUATED) {
-                double gpa = gpaCalculator.calculate(student.getEnrollments());
-                if (gpa == GpaCalculator.NO_GPA || gpa < 2.0) {
-                    throw new ConflictException("Mezuniyet için GNO en az 2.00 olmalıdır");
-                }
-                notificationService.enqueue(student.getEmail(), "Tebrikler!",
-                        "Sevgili " + student.getFirstName() + ", mezuniyetiniz onaylandı.");
+        var updated = new Student(
+                student.id(),
+                student.studentNumber(),
+                firstName == null ? student.firstName() : capitalize(firstName),
+                lastName == null ? student.lastName() : capitalize(lastName),
+                email == null ? student.email() : email.strip().toLowerCase(Locale.ROOT),
+                requireNonNullElse(birthDate, student.birthDate()),
+                department == null ? student.department() : department.strip(),
+                requireNonNullElse(status, student.status()),
+                student.enrollments());
+
+        boolean graduating = updated.status() == StudentStatus.GRADUATED && student.status() != StudentStatus.GRADUATED;
+        if (graduating) {
+            var gpa = gpaOf(updated);
+            if (gpa.isEmpty() || gpa.getAsDouble() < 2.0) {
+                throw new Conflict("Mezuniyet için GNO en az 2.00 olmalıdır");
             }
-            student.setStatus(status);
         }
-        return repository.save(student);
+        var saved = repository.save(updated);
+        if (graduating) {
+            notifications.enqueue(saved.email(), "Tebrikler!",
+                    "Sevgili %s, mezuniyetiniz onaylandı.".formatted(saved.firstName()));
+        }
+        return saved;
     }
 
-    public void deleteStudent(Long id) {
-        Student student = getStudent(id);
-        for (Iterator it = student.getEnrollments().iterator(); it.hasNext();) {
-            Enrollment enrollment = (Enrollment) it.next();
-            if (enrollment.isGraded()) {
-                throw new ConflictException(
-                        "Notu girilmiş dersi olan öğrenci silinemez, durumunu WITHDRAWN olarak güncelleyin");
-            }
+    public void deleteStudent(long id) {
+        var student = getStudent(id);
+        if (student.enrollments().stream().anyMatch(Enrollment::isGraded)) {
+            throw new Conflict("Notu girilmiş dersi olan öğrenci silinemez, durumunu WITHDRAWN olarak güncelleyin");
         }
         repository.delete(id);
     }
 
-    public Enrollment enroll(Long id, Map body) {
-        Student student = getStudent(id);
-        String courseCode = getString(body, "courseCode");
-        String semester = getString(body, "semester");
+    public Enrollment enroll(long id, Map<String, Object> body) {
+        var student = getStudent(id);
+        var courseCode = getString(body, "courseCode");
+        var semesterText = getString(body, "semester");
 
-        List errors = new ArrayList();
+        var errors = new ArrayList<String>();
         Course course = null;
-        if (StringUtils.isBlank(courseCode)) {
+        if (isBlank(courseCode)) {
             errors.add("courseCode zorunludur");
         } else {
-            course = CourseCatalog.findByCode(courseCode);
+            course = CourseCatalog.findByCode(courseCode).orElse(null);
             if (course == null) {
                 errors.add("Ders bulunamadı: " + courseCode);
             }
         }
-        if (StringUtils.isBlank(semester)) {
+        if (isBlank(semesterText)) {
             errors.add("semester zorunludur");
-        } else if (!semester.trim().matches("\\d{4}-(GUZ|BAHAR|YAZ)")) {
+        } else if (!SEMESTER.matcher(semesterText.strip()).matches()) {
             errors.add("semester YYYY-GUZ, YYYY-BAHAR veya YYYY-YAZ formatında olmalıdır");
         }
-        if (errors.size() > 0) {
-            throw new ValidationException(errors);
+        if (!errors.isEmpty()) {
+            throw new Validation(errors);
         }
-        semester = semester.trim();
+        var semester = semesterText.strip();
 
-        if (student.getStatus() != StudentStatus.ACTIVE) {
-            throw new ConflictException("Sadece aktif öğrenciler derse kaydolabilir, mevcut durum: "
-                    + StudentStatusUtil.toLabel(student.getStatus()));
+        if (student.status() != StudentStatus.ACTIVE) {
+            throw new Conflict("Sadece aktif öğrenciler derse kaydolabilir, mevcut durum: " + student.status());
         }
 
-        int semesterCredits = 0;
-        for (int i = 0; i < student.getEnrollments().size(); i++) {
-            Enrollment existing = (Enrollment) student.getEnrollments().get(i);
-            if (existing.getCourseCode().equals(course.getCode())) {
-                if (existing.getLetterGrade() == null) {
-                    throw new ConflictException("Öğrenci bu derse zaten kayıtlı: " + course.getCode());
+        // Sıra önemli: ilk eşleşen kayıt hangi hatanın döneceğini belirler, bu yüzden erken çıkışlı döngü.
+        for (var existing : student.enrollments()) {
+            if (existing.courseCode().equals(course.code())) {
+                if (!existing.isGraded()) {
+                    throw new Conflict("Öğrenci bu derse zaten kayıtlı: " + course.code());
                 }
-                if (gpaCalculator.isPassing(existing.getLetterGrade())) {
-                    throw new ConflictException("Öğrenci bu dersi zaten geçmiş: " + course.getCode());
-                }
-            }
-            if (existing.getSemester().equals(semester)) {
-                Course existingCourse = CourseCatalog.findByCode(existing.getCourseCode());
-                if (existingCourse != null) {
-                    semesterCredits += existingCourse.getCredits();
+                if (existing.letterGrade().isPassing()) {
+                    throw new Conflict("Öğrenci bu dersi zaten geçmiş: " + course.code());
                 }
             }
         }
-        if (semesterCredits + course.getCredits() > MAX_CREDITS_PER_SEMESTER) {
-            throw new ConflictException("Dönem kredi limiti aşıldı: " + (semesterCredits + course.getCredits())
-                    + " > " + MAX_CREDITS_PER_SEMESTER);
+        int semesterCredits = student.enrollments().stream()
+                .filter(e -> e.semester().equals(semester))
+                .flatMap(e -> CourseCatalog.findByCode(e.courseCode()).stream())
+                .mapToInt(Course::credits)
+                .sum();
+        int requested = semesterCredits + course.credits();
+        if (requested > MAX_CREDITS_PER_SEMESTER) {
+            throw new Conflict("Dönem kredi limiti aşıldı: " + requested + " > " + MAX_CREDITS_PER_SEMESTER);
         }
 
-        Enrollment enrollment = new Enrollment(course.getCode(), semester, null);
-        student.addEnrollment(enrollment);
-        repository.save(student);
+        var enrollment = new Enrollment(course.code(), semester, null);
+        var enrollments = new ArrayList<>(student.enrollments());
+        enrollments.add(enrollment);
+        repository.save(student.withEnrollments(enrollments));
         return enrollment;
     }
 
-    public Enrollment gradeEnrollment(Long id, String courseCode, Map body) {
-        Student student = getStudent(id);
-        String letterGrade = getString(body, "letterGrade");
-        if (StringUtils.isBlank(letterGrade) || !gpaCalculator.isValidGrade(letterGrade)) {
-            throw new ValidationException("letterGrade şunlardan biri olmalıdır: AA, BA, BB, CB, CC, DC, DD, FD, FF");
+    public Enrollment gradeEnrollment(long id, String courseCode, Map<String, Object> body) {
+        var student = getStudent(id);
+        var grade = LetterGrade.parse(getString(body, "letterGrade")).orElseThrow(() ->
+                new Validation("letterGrade şunlardan biri olmalıdır: AA, BA, BB, CB, CC, DC, DD, FD, FF"));
+
+        var enrollments = new ArrayList<>(student.enrollments());
+        int index = IntStream.range(0, enrollments.size())
+                .filter(i -> enrollments.get(i).courseCode().equalsIgnoreCase(courseCode) && !enrollments.get(i).isGraded())
+                .findFirst()
+                .orElseThrow(() -> new NotFound("Notlandırılacak ders kaydı bulunamadı: " + courseCode));
+
+        var graded = enrollments.get(index).withGrade(grade);
+        enrollments.set(index, graded);
+        repository.save(student.withEnrollments(enrollments));
+        if (!grade.isPassing()) {
+            notifications.enqueue(student.email(), "Ders sonucu",
+                    "%s dersinden %s notu ile kaldınız.".formatted(graded.courseCode(), grade));
         }
-        Enrollment target = null;
-        for (Iterator it = student.getEnrollments().iterator(); it.hasNext();) {
-            Enrollment enrollment = (Enrollment) it.next();
-            if (enrollment.getCourseCode().equalsIgnoreCase(courseCode) && enrollment.getLetterGrade() == null) {
-                target = enrollment;
-                break;
-            }
-        }
-        if (target == null) {
-            throw new NotFoundException("Notlandırılacak ders kaydı bulunamadı: " + courseCode);
-        }
-        target.setLetterGrade(letterGrade.trim().toUpperCase());
-        repository.save(student);
-        if (!gpaCalculator.isPassing(target.getLetterGrade())) {
-            notificationService.enqueue(student.getEmail(), "Ders sonucu",
-                    target.getCourseCode() + " dersinden " + target.getLetterGrade() + " notu ile kaldınız.");
-        }
-        return target;
+        return graded;
     }
 
     // ------------------------------------------------------------------ raporlar
 
-    public Map gpaSummary(Long id) {
-        Student student = getStudent(id);
-        double gpa = gpaCalculator.calculate(student.getEnrollments());
-        int gradedCourses = 0;
-        for (int i = 0; i < student.getEnrollments().size(); i++) {
-            if (((Enrollment) student.getEnrollments().get(i)).isGraded()) {
-                gradedCourses++;
-            }
-        }
-        Map result = new LinkedHashMap();
-        result.put("studentId", student.getId());
-        result.put("studentNumber", student.getStudentNumber());
-        result.put("gpa", gpa == GpaCalculator.NO_GPA ? null : new Double(gpa));
+    public SequencedMap<String, Object> gpaSummary(long id) {
+        var student = getStudent(id);
+        var gpa = gpaOf(student);
+        var result = new LinkedHashMap<String, Object>();
+        result.put("studentId", student.id());
+        result.put("studentNumber", student.studentNumber());
+        result.put("gpa", gpa.isPresent() ? gpa.getAsDouble() : null);
         result.put("honor", gpaCalculator.honorLevel(gpa));
-        result.put("completedCredits", new Integer(gpaCalculator.completedCredits(student.getEnrollments())));
-        result.put("gradedCourses", new Integer(gradedCourses));
+        result.put("completedCredits", gpaCalculator.completedCredits(student.enrollments()));
+        result.put("gradedCourses", (int) student.enrollments().stream().filter(Enrollment::isGraded).count());
         return result;
     }
 
-    public String transcript(Long id) {
-        Student student = getStudent(id);
-        String line = StringUtils.repeat("=", 60);
-        String thinLine = StringUtils.repeat("-", 60);
+    public String transcript(long id) {
+        var student = getStudent(id);
+        var line = "=".repeat(60);
+        var thinLine = "-".repeat(60);
 
-        StringBuffer sb = new StringBuffer();
-        sb.append(line).append("\n");
-        sb.append("TRANSKRİPT").append("\n");
-        sb.append(line).append("\n");
-        sb.append("Öğrenci No : ").append(student.getStudentNumber()).append("\n");
-        sb.append("Ad Soyad   : ").append(student.getFullName()).append("\n");
-        sb.append("Bölüm      : ").append(student.getDepartment()).append("\n");
-        sb.append("Durum      : ").append(StudentStatusUtil.toLabel(student.getStatus())).append("\n");
-        sb.append(thinLine).append("\n");
+        var sb = new StringBuilder("""
+                %s
+                TRANSKRİPT
+                %s
+                Öğrenci No : %s
+                Ad Soyad   : %s
+                Bölüm      : %s
+                Durum      : %s
+                %s
+                """.formatted(line, line, student.studentNumber(), student.fullName(), student.department(),
+                student.status(), thinLine));
 
-        Map bySemester = new TreeMap();
-        for (Iterator it = student.getEnrollments().iterator(); it.hasNext();) {
-            Enrollment enrollment = (Enrollment) it.next();
-            List list = (List) bySemester.get(enrollment.getSemester());
-            if (list == null) {
-                list = new ArrayList();
-                bySemester.put(enrollment.getSemester(), list);
-            }
-            list.add(enrollment);
-        }
+        var bySemester = student.enrollments().stream()
+                .collect(Collectors.groupingBy(Enrollment::semester, TreeMap::new, Collectors.toList()));
         if (bySemester.isEmpty()) {
-            sb.append("Ders kaydı bulunmuyor.").append("\n");
+            sb.append("Ders kaydı bulunmuyor.\n");
         }
-        for (Iterator it = bySemester.entrySet().iterator(); it.hasNext();) {
-            Map.Entry entry = (Map.Entry) it.next();
-            sb.append("[").append(entry.getKey()).append("]").append("\n");
-            List list = (List) entry.getValue();
-            for (int i = 0; i < list.size(); i++) {
-                Enrollment enrollment = (Enrollment) list.get(i);
-                Course course = CourseCatalog.findByCode(enrollment.getCourseCode());
-                String name = course == null ? "?" : course.getName();
-                String credits = course == null ? "?" : String.valueOf(course.getCredits());
-                String grade = enrollment.getLetterGrade() == null ? "--" : enrollment.getLetterGrade();
-                sb.append("  ").append(StringUtils.padRight(enrollment.getCourseCode(), 9))
-                        .append(StringUtils.padRight(name, 28))
-                        .append(StringUtils.padRight(credits, 6))
-                        .append(grade).append("\n");
+        bySemester.forEach((semester, enrollments) -> {
+            sb.append('[').append(semester).append("]\n");
+            for (var enrollment : enrollments) {
+                var course = CourseCatalog.findByCode(enrollment.courseCode());
+                sb.append("  %-9s%-28s%-6s%s\n".formatted(
+                        enrollment.courseCode(),
+                        course.map(Course::name).orElse("?"),
+                        course.map(c -> String.valueOf(c.credits())).orElse("?"),
+                        enrollment.isGraded() ? enrollment.letterGrade() : "--"));
             }
-        }
-        sb.append(thinLine).append("\n");
-        double gpa = gpaCalculator.calculate(student.getEnrollments());
-        String gpaText = gpa == GpaCalculator.NO_GPA ? "-" : String.format(Locale.US, "%.2f", new Object[] {new Double(gpa)});
-        sb.append("GNO: ").append(gpaText).append(" (").append(gpaCalculator.honorLevel(gpa)).append(")").append("\n");
-        sb.append("Tamamlanan kredi: ").append(gpaCalculator.completedCredits(student.getEnrollments())).append("\n");
+        });
+
+        var gpa = gpaOf(student);
+        var gpaText = gpa.isPresent() ? String.format(Locale.US, "%.2f", gpa.getAsDouble()) : "-";
+        sb.append(thinLine).append('\n')
+                .append("GNO: %s (%s)\n".formatted(gpaText, gpaCalculator.honorLevel(gpa)))
+                .append("Tamamlanan kredi: ").append(gpaCalculator.completedCredits(student.enrollments())).append('\n');
         return sb.toString();
     }
 
-    public Map statistics() {
-        List all = repository.findAll();
+    public SequencedMap<String, Object> statistics() {
+        var students = repository.findAll();
 
-        Map byStatus = new LinkedHashMap();
-        for (int i = 0; i < StudentStatusUtil.ALL.length; i++) {
-            byStatus.put(StudentStatusUtil.toLabel(StudentStatusUtil.ALL[i]), new Integer(0));
+        var byStatus = new EnumMap<StudentStatus, Integer>(StudentStatus.class);
+        for (var status : StudentStatus.values()) {
+            byStatus.put(status, 0);
         }
-        Map byDepartment = new TreeMap();
-        Map courseCounts = new TreeMap();
-        Map gradeDistribution = new LinkedHashMap();
-        for (int i = 0; i < GpaCalculator.LETTER_GRADES.length; i++) {
-            gradeDistribution.put(GpaCalculator.LETTER_GRADES[i], new Integer(0));
-        }
+        students.forEach(s -> byStatus.merge(s.status(), 1, Integer::sum));
 
+        var byDepartment = students.stream()
+                .collect(Collectors.groupingBy(Student::department, TreeMap::new, Collectors.summingInt(_ -> 1)));
+
+        var courseEnrollments = students.stream()
+                .flatMap(s -> s.enrollments().stream().map(Enrollment::courseCode).distinct())
+                .collect(Collectors.groupingBy(Function.identity(), TreeMap::new, Collectors.summingInt(_ -> 1)));
+
+        var gradeDistribution = new EnumMap<LetterGrade, Integer>(LetterGrade.class);
+        for (var grade : LetterGrade.values()) {
+            gradeDistribution.put(grade, 0);
+        }
+        students.stream()
+                .flatMap(s -> s.enrollments().stream())
+                .filter(Enrollment::isGraded)
+                .forEach(e -> gradeDistribution.merge(e.letterGrade(), 1, Integer::sum));
+
+        record Ranked(Student student, double gpa) {
+        }
+        var ranked = students.stream()
+                .<Ranked>mapMulti((s, sink) -> gpaOf(s).ifPresent(gpa -> sink.accept(new Ranked(s, gpa))))
+                .toList();
+
+        // Sıralı toplama: DoubleStream.average()'ın telafili toplaması yuvarlamada farklı sonuç verebilir.
         double gpaTotal = 0.0;
-        int gpaCount = 0;
-        final Map gpaByStudent = new LinkedHashMap();
-
-        for (Iterator it = all.iterator(); it.hasNext();) {
-            Student student = (Student) it.next();
-
-            String statusLabel = StudentStatusUtil.toLabel(student.getStatus());
-            Integer statusCount = (Integer) byStatus.get(statusLabel);
-            byStatus.put(statusLabel, new Integer(statusCount.intValue() + 1));
-
-            if (byDepartment.containsKey(student.getDepartment())) {
-                Integer count = (Integer) byDepartment.get(student.getDepartment());
-                byDepartment.put(student.getDepartment(), new Integer(count.intValue() + 1));
-            } else {
-                byDepartment.put(student.getDepartment(), new Integer(1));
-            }
-
-            Set seenCourses = new HashSet();
-            for (Iterator eit = student.getEnrollments().iterator(); eit.hasNext();) {
-                Enrollment enrollment = (Enrollment) eit.next();
-                if (seenCourses.add(enrollment.getCourseCode())) {
-                    Integer count = (Integer) courseCounts.get(enrollment.getCourseCode());
-                    courseCounts.put(enrollment.getCourseCode(), new Integer(count == null ? 1 : count.intValue() + 1));
-                }
-                if (enrollment.getLetterGrade() != null) {
-                    Integer count = (Integer) gradeDistribution.get(enrollment.getLetterGrade());
-                    gradeDistribution.put(enrollment.getLetterGrade(), new Integer(count.intValue() + 1));
-                }
-            }
-
-            double gpa = gpaCalculator.calculate(student.getEnrollments());
-            if (gpa != GpaCalculator.NO_GPA) {
-                gpaTotal += gpa;
-                gpaCount++;
-                gpaByStudent.put(student, new Double(gpa));
-            }
+        for (var r : ranked) {
+            gpaTotal += r.gpa();
         }
+        var topStudents = ranked.stream()
+                .sorted(Comparator.comparingDouble(Ranked::gpa).reversed())
+                .limit(3)
+                .map(r -> {
+                    var item = new LinkedHashMap<String, Object>();
+                    item.put("id", r.student().id());
+                    item.put("fullName", r.student().fullName());
+                    item.put("gpa", r.gpa());
+                    return item;
+                })
+                .toList();
 
-        List ranked = new ArrayList(gpaByStudent.keySet());
-        Collections.sort(ranked, new Comparator() {
-            public int compare(Object o1, Object o2) {
-                Double g1 = (Double) gpaByStudent.get(o1);
-                Double g2 = (Double) gpaByStudent.get(o2);
-                return g2.compareTo(g1);
-            }
-        });
-        List topStudents = new ArrayList();
-        for (int i = 0; i < ranked.size() && i < 3; i++) {
-            Student student = (Student) ranked.get(i);
-            Map item = new LinkedHashMap();
-            item.put("id", student.getId());
-            item.put("fullName", student.getFullName());
-            item.put("gpa", gpaByStudent.get(student));
-            topStudents.add(item);
-        }
-
-        Map result = new LinkedHashMap();
-        result.put("totalStudents", new Integer(all.size()));
+        var result = new LinkedHashMap<String, Object>();
+        result.put("totalStudents", students.size());
         result.put("byStatus", byStatus);
         result.put("byDepartment", byDepartment);
-        result.put("averageGpa", gpaCount == 0 ? null : new Double(GpaCalculator.round(gpaTotal / gpaCount)));
+        result.put("averageGpa", ranked.isEmpty() ? null : GpaCalculator.round(gpaTotal / ranked.size()));
         result.put("topStudents", topStudents);
-        result.put("courseEnrollments", courseCounts);
+        result.put("courseEnrollments", courseEnrollments);
         result.put("gradeDistribution", gradeDistribution);
         return result;
     }
 
     // ------------------------------------------------------------------ yardımcılar
 
-    private boolean emailInUse(String email, Long excludeId) {
-        List all = repository.findAll();
-        for (int i = 0; i < all.size(); i++) {
-            Student student = (Student) all.get(i);
-            if (excludeId != null && excludeId.equals(student.getId())) {
-                continue;
-            }
-            if (student.getEmail() != null && student.getEmail().equalsIgnoreCase(email.trim())) {
-                return true;
-            }
-        }
-        return false;
+    private OptionalDouble gpaOf(Student student) {
+        return gpaCalculator.calculate(student.enrollments());
     }
 
-    private static String getString(Map body, String key) {
-        Object value = body.get(key);
-        if (value == null) {
+    private LocalDate validateBirthDate(String text, List<String> errors) {
+        try {
+            var birthDate = Dates.parse(text);
+            if (birthDate.until(LocalDate.now(clock)).getYears() < MIN_AGE) {
+                errors.add("öğrenci en az " + MIN_AGE + " yaşında olmalıdır");
+            }
+            return birthDate;
+        } catch (DateTimeParseException _) {
+            errors.add("birthDate yyyy-MM-dd formatında olmalıdır");
             return null;
         }
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value.toString();
+    }
+
+    private boolean emailInUse(String email, Long excludeId) {
+        var normalized = email.strip();
+        return repository.findAll().stream()
+                .filter(s -> excludeId == null || !excludeId.equals(s.id()))
+                .anyMatch(s -> s.email() != null && s.email().equalsIgnoreCase(normalized));
+    }
+
+    private static String getString(Map<String, Object> body, String key) {
+        return switch (body.get(key)) {
+            case null -> null;
+            case String s -> s;
+            case Object other -> other.toString();
+        };
     }
 }

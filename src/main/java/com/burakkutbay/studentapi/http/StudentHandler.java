@@ -1,42 +1,47 @@
 package com.burakkutbay.studentapi.http;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.burakkutbay.studentapi.json.JsonException;
 import com.burakkutbay.studentapi.json.JsonParser;
-import com.burakkutbay.studentapi.model.Enrollment;
-import com.burakkutbay.studentapi.model.Student;
 import com.burakkutbay.studentapi.security.ApiKeyService;
-import com.burakkutbay.studentapi.service.ConflictException;
-import com.burakkutbay.studentapi.service.NotFoundException;
+import com.burakkutbay.studentapi.service.ApiException;
 import com.burakkutbay.studentapi.service.StudentService;
-import com.burakkutbay.studentapi.service.ValidationException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
-/**
- * /api/students altındaki tüm uç noktaları yönetir.
- *
- * GET    /api/students?department=&status=&sort=
- * POST   /api/students
- * GET    /api/students/{id}
- * PUT    /api/students/{id}
- * DELETE /api/students/{id}
- * POST   /api/students/{id}/enrollments
- * PUT    /api/students/{id}/enrollments/{courseCode}/grade
- * GET    /api/students/{id}/gpa
- * GET    /api/students/{id}/transcript
- */
-public class StudentHandler implements HttpHandler {
+/// `/api/students` altındaki tüm uç noktaları yönetir.
+///
+/// | Metot  | Yol                                                  |
+/// |--------|------------------------------------------------------|
+/// | GET    | `/api/students?department=&status=&sort=`            |
+/// | POST   | `/api/students`                                      |
+/// | GET    | `/api/students/{id}`                                 |
+/// | PUT    | `/api/students/{id}`                                 |
+/// | DELETE | `/api/students/{id}`                                 |
+/// | POST   | `/api/students/{id}/enrollments`                     |
+/// | PUT    | `/api/students/{id}/enrollments/{courseCode}/grade`  |
+/// | GET    | `/api/students/{id}/gpa`                             |
+/// | GET    | `/api/students/{id}/transcript`                      |
+public final class StudentHandler implements HttpHandler {
 
     private static final Logger LOG = Logger.getLogger(StudentHandler.class.getName());
 
     public static final String CONTEXT = "/api/students";
+
+    /// Handler'ın ürettiği tüm yanıt türleri; gönderim tek bir exhaustive `switch` ile yapılır.
+    sealed interface Response {
+        record Json(int status, Object body) implements Response {}
+        record Created(Object body, String location) implements Response {}
+        record Text(String body) implements Response {}
+        record NoContent() implements Response {}
+        record Error(int status, String message, List<String> errors) implements Response {}
+    }
 
     private final StudentService studentService;
     private final ApiKeyService apiKeyService;
@@ -46,104 +51,132 @@ public class StudentHandler implements HttpHandler {
         this.apiKeyService = apiKeyService;
     }
 
+    @Override
     public void handle(HttpExchange exchange) throws IOException {
-        String method = exchange.getRequestMethod();
-        String path = exchange.getRequestURI().getPath();
-        long start = System.currentTimeMillis();
-        int status = 200;
+        var context = RequestContext.of(exchange.getRequestMethod(), exchange.getRequestURI().getPath());
         try {
-            String[] parts = path.substring(CONTEXT.length()).split("/");
-            List segments = new ArrayList();
-            for (int i = 0; i < parts.length; i++) {
-                if (parts[i].length() > 0) {
-                    segments.add(parts[i]);
-                }
-            }
-
-            if (!method.equals("GET") && !apiKeyService.isValid(exchange.getRequestHeaders().getFirst("X-API-Key"))) {
-                status = 401;
-                HttpUtils.sendError(exchange, status, "Geçersiz veya eksik API anahtarı", null);
-                return;
-            }
-
-            if (segments.size() == 0) {
-                if (method.equals("GET")) {
-                    Map query = HttpUtils.parseQuery(exchange.getRequestURI().getRawQuery());
-                    List students = studentService.listStudents((String) query.get("department"),
-                            (String) query.get("status"), (String) query.get("sort"));
-                    HttpUtils.sendJson(exchange, status, students);
-                } else if (method.equals("POST")) {
-                    Map body = JsonParser.parseObject(HttpUtils.readBody(exchange));
-                    Student created = studentService.createStudent(body);
-                    status = 201;
-                    exchange.getResponseHeaders().set("Location", CONTEXT + "/" + created.getId());
-                    HttpUtils.sendJson(exchange, status, created);
-                } else {
-                    status = 405;
-                    HttpUtils.sendError(exchange, status, "Desteklenmeyen metot: " + method, null);
-                }
-            } else if (segments.size() == 1) {
-                Long id = Long.valueOf((String) segments.get(0));
-                if (method.equals("GET")) {
-                    HttpUtils.sendJson(exchange, status, studentService.getStudent(id));
-                } else if (method.equals("PUT")) {
-                    Map body = JsonParser.parseObject(HttpUtils.readBody(exchange));
-                    HttpUtils.sendJson(exchange, status, studentService.updateStudent(id, body));
-                } else if (method.equals("DELETE")) {
-                    studentService.deleteStudent(id);
-                    status = 204;
-                    HttpUtils.sendNoContent(exchange);
-                } else {
-                    status = 405;
-                    HttpUtils.sendError(exchange, status, "Desteklenmeyen metot: " + method, null);
-                }
-            } else if (segments.size() == 2) {
-                Long id = Long.valueOf((String) segments.get(0));
-                String action = (String) segments.get(1);
-                if (action.equals("enrollments") && method.equals("POST")) {
-                    Map body = JsonParser.parseObject(HttpUtils.readBody(exchange));
-                    Enrollment enrollment = studentService.enroll(id, body);
-                    status = 201;
-                    HttpUtils.sendJson(exchange, status, enrollment);
-                } else if (action.equals("gpa") && method.equals("GET")) {
-                    HttpUtils.sendJson(exchange, status, studentService.gpaSummary(id));
-                } else if (action.equals("transcript") && method.equals("GET")) {
-                    HttpUtils.sendText(exchange, status, studentService.transcript(id));
-                } else {
-                    status = 404;
-                    HttpUtils.sendError(exchange, status, "Kaynak bulunamadı: " + path, null);
-                }
-            } else if (segments.size() == 4 && segments.get(1).equals("enrollments")
-                    && segments.get(3).equals("grade") && method.equals("PUT")) {
-                Long id = Long.valueOf((String) segments.get(0));
-                Map body = JsonParser.parseObject(HttpUtils.readBody(exchange));
-                HttpUtils.sendJson(exchange, status,
-                        studentService.gradeEnrollment(id, (String) segments.get(2), body));
-            } else {
-                status = 404;
-                HttpUtils.sendError(exchange, status, "Kaynak bulunamadı: " + path, null);
-            }
-        } catch (ValidationException e) {
-            status = 400;
-            HttpUtils.sendError(exchange, status, e.getMessage(), e.getErrors());
-        } catch (NotFoundException e) {
-            status = 404;
-            HttpUtils.sendError(exchange, status, e.getMessage(), null);
-        } catch (ConflictException e) {
-            status = 409;
-            HttpUtils.sendError(exchange, status, e.getMessage(), null);
-        } catch (JsonException e) {
-            status = 400;
-            HttpUtils.sendError(exchange, status, "Geçersiz JSON: " + e.getMessage(), null);
-        } catch (NumberFormatException e) {
-            status = 400;
-            HttpUtils.sendError(exchange, status, "Geçersiz öğrenci id", null);
+            ScopedValue.where(RequestContext.CURRENT, context).call(() -> {
+                handleInScope(exchange, context);
+                return null;
+            });
+        } catch (IOException | RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            status = 500;
-            LOG.log(Level.SEVERE, "Beklenmeyen hata: " + method + " " + path, e);
-            HttpUtils.sendError(exchange, status, "Beklenmeyen bir hata oluştu", null);
-        } finally {
-            LOG.info(method + " " + path + " -> " + status + " (" + (System.currentTimeMillis() - start) + " ms)");
+            throw new IOException(e);
         }
+    }
+
+    private void handleInScope(HttpExchange exchange, RequestContext ctx) throws IOException {
+        long start = System.nanoTime();
+        var response = resolve(exchange, ctx);
+        int status = send(exchange, response);
+        LOG.info(() -> "%s%s %s -> %d (%d ms)".formatted(RequestContext.logPrefix(), ctx.method(), ctx.path(), status,
+                (System.nanoTime() - start) / 1_000_000));
+    }
+
+    private Response resolve(HttpExchange exchange, RequestContext ctx) {
+        try {
+            var segments = Arrays.stream(ctx.path().substring(CONTEXT.length()).split("/"))
+                    .filter(Predicate.not(String::isEmpty))
+                    .toList();
+            if (!ctx.method().equals("GET")
+                    && !apiKeyService.isValid(exchange.getRequestHeaders().getFirst("X-API-Key"))) {
+                return new Response.Error(401, "Geçersiz veya eksik API anahtarı", null);
+            }
+            return route(exchange, ctx, segments);
+        } catch (ApiException e) {
+            return switch (e) {
+                case ApiException.Validation v -> new Response.Error(400, v.getMessage(), v.errors());
+                case ApiException.NotFound n -> new Response.Error(404, n.getMessage(), null);
+                case ApiException.Conflict c -> new Response.Error(409, c.getMessage(), null);
+            };
+        } catch (JsonException e) {
+            return new Response.Error(400, "Geçersiz JSON: " + e.getMessage(), null);
+        } catch (NumberFormatException _) {
+            return new Response.Error(400, "Geçersiz öğrenci id", null);
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, RequestContext.logPrefix() + "Beklenmeyen hata: " + ctx.method() + " " + ctx.path(), e);
+            return new Response.Error(500, "Beklenmeyen bir hata oluştu", null);
+        }
+    }
+
+    private Response route(HttpExchange exchange, RequestContext ctx, List<String> segments) throws IOException {
+        var method = ctx.method();
+        return switch (segments.size()) {
+            case 0 -> switch (method) {
+                case "GET" -> {
+                    var query = HttpUtils.parseQuery(exchange.getRequestURI().getRawQuery());
+                    yield new Response.Json(200, studentService.listStudents(
+                            query.get("department"), query.get("status"), query.get("sort")));
+                }
+                case "POST" -> {
+                    var created = studentService.createStudent(JsonParser.parseObject(HttpUtils.readBody(exchange)));
+                    yield new Response.Created(created, CONTEXT + "/" + created.id());
+                }
+                default -> methodNotAllowed(method);
+            };
+            case 1 -> {
+                long id = Long.parseLong(segments.getFirst());
+                yield switch (method) {
+                    case "GET" -> new Response.Json(200, studentService.getStudent(id));
+                    case "PUT" -> new Response.Json(200,
+                            studentService.updateStudent(id, JsonParser.parseObject(HttpUtils.readBody(exchange))));
+                    case "DELETE" -> {
+                        studentService.deleteStudent(id);
+                        yield new Response.NoContent();
+                    }
+                    default -> methodNotAllowed(method);
+                };
+            }
+            case 2 -> {
+                long id = Long.parseLong(segments.getFirst());
+                yield switch (method + " " + segments.getLast()) {
+                    case "POST enrollments" -> new Response.Json(201,
+                            studentService.enroll(id, JsonParser.parseObject(HttpUtils.readBody(exchange))));
+                    case "GET gpa" -> new Response.Json(200, studentService.gpaSummary(id));
+                    case "GET transcript" -> new Response.Text(studentService.transcript(id));
+                    default -> notFound(ctx);
+                };
+            }
+            case 4 -> method.equals("PUT") && segments.get(1).equals("enrollments") && segments.getLast().equals("grade")
+                    ? new Response.Json(200, studentService.gradeEnrollment(Long.parseLong(segments.getFirst()),
+                            segments.get(2), JsonParser.parseObject(HttpUtils.readBody(exchange))))
+                    : notFound(ctx);
+            default -> notFound(ctx);
+        };
+    }
+
+    private static int send(HttpExchange exchange, Response response) throws IOException {
+        return switch (response) {
+            case Response.Json(int status, Object body) -> {
+                HttpUtils.sendJson(exchange, status, body);
+                yield status;
+            }
+            case Response.Created(Object body, String location) -> {
+                exchange.getResponseHeaders().set("Location", location);
+                HttpUtils.sendJson(exchange, 201, body);
+                yield 201;
+            }
+            case Response.Text(String body) -> {
+                HttpUtils.sendText(exchange, 200, body);
+                yield 200;
+            }
+            case Response.NoContent() -> {
+                HttpUtils.sendNoContent(exchange);
+                yield 204;
+            }
+            case Response.Error(int status, String message, List<String> errors) -> {
+                HttpUtils.sendError(exchange, status, message, errors);
+                yield status;
+            }
+        };
+    }
+
+    private static Response methodNotAllowed(String method) {
+        return new Response.Error(405, "Desteklenmeyen metot: " + method, null);
+    }
+
+    private static Response notFound(RequestContext ctx) {
+        return new Response.Error(404, "Kaynak bulunamadı: " + ctx.path(), null);
     }
 }

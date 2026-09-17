@@ -1,11 +1,9 @@
 package com.burakkutbay.studentapi.json;
 
-import java.util.Map;
+import java.util.SequencedMap;
 
-/**
- * JSON'a dönüştürülebilen nesneler için sözleşme.
- */
+/// JSON'a dönüştürülebilen nesneler için sözleşme. Anahtar sırası çıktıda korunur.
 public interface JsonSerializable {
 
-    Map toMap();
+    SequencedMap<String, Object> toMap();
 }

@@ -1,55 +1,44 @@
 package com.burakkutbay.studentapi.service;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.burakkutbay.studentapi.model.Course;
 
-/**
- * Sabit ders kataloğu.
- */
+/// Sabit, değişmez ders kataloğu.
 public final class CourseCatalog {
 
-    private static final Map COURSES = new HashMap();
+    private static final List<Course> ALL = Stream.of(
+                    new Course("CENG101", "Programlamaya Giriş", 4, "Bilgisayar Mühendisliği"),
+                    new Course("CENG202", "Veri Yapıları", 4, "Bilgisayar Mühendisliği"),
+                    new Course("CENG305", "Veritabanı Sistemleri", 3, "Bilgisayar Mühendisliği"),
+                    new Course("CENG350", "Yazılım Mühendisliği", 3, "Bilgisayar Mühendisliği"),
+                    new Course("MATH101", "Analiz I", 5, "Matematik"),
+                    new Course("MATH201", "Lineer Cebir", 3, "Matematik"),
+                    new Course("PHYS101", "Fizik I", 4, "Fizik"),
+                    new Course("PHYS210", "Kuantum Fiziğine Giriş", 3, "Fizik"))
+            .sorted(Comparator.comparing(Course::code))
+            .toList();
 
-    static {
-        register(new Course("CENG101", "Programlamaya Giriş", 4, "Bilgisayar Mühendisliği"));
-        register(new Course("CENG202", "Veri Yapıları", 4, "Bilgisayar Mühendisliği"));
-        register(new Course("CENG305", "Veritabanı Sistemleri", 3, "Bilgisayar Mühendisliği"));
-        register(new Course("CENG350", "Yazılım Mühendisliği", 3, "Bilgisayar Mühendisliği"));
-        register(new Course("MATH101", "Analiz I", 5, "Matematik"));
-        register(new Course("MATH201", "Lineer Cebir", 3, "Matematik"));
-        register(new Course("PHYS101", "Fizik I", 4, "Fizik"));
-        register(new Course("PHYS210", "Kuantum Fiziğine Giriş", 3, "Fizik"));
-    }
+    private static final Map<String, Course> BY_CODE = ALL.stream()
+            .collect(Collectors.toUnmodifiableMap(Course::code, Function.identity()));
 
     private CourseCatalog() {
     }
 
-    private static void register(Course course) {
-        COURSES.put(course.getCode(), course);
+    public static Optional<Course> findByCode(String code) {
+        return Optional.ofNullable(code)
+                .map(c -> c.strip().toUpperCase(Locale.ROOT))
+                .map(BY_CODE::get);
     }
 
-    public static Course findByCode(String code) {
-        if (code == null) {
-            return null;
-        }
-        return (Course) COURSES.get(code.trim().toUpperCase());
-    }
-
-    public static List findAll() {
-        List list = new ArrayList(COURSES.values());
-        Collections.sort(list, new Comparator() {
-            public int compare(Object o1, Object o2) {
-                Course c1 = (Course) o1;
-                Course c2 = (Course) o2;
-                return c1.getCode().compareTo(c2.getCode());
-            }
-        });
-        return Collections.unmodifiableList(list);
+    public static List<Course> findAll() {
+        return ALL;
     }
 }
