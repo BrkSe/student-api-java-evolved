@@ -1,8 +1,8 @@
 # Modernizasyon Raporu: Java 8 → Java 25
 
 Bu branch, `main` üzerindeki bilerek eski Java alışkanlıklarıyla yazılmış Student API'yi
-[java.evolved](https://javaevolved.dev/tr/) desenleri ve java.evolved'un
-[`modern-java` agent skill'i](https://javaevolved.dev/agent-plugin.html) ile modernize eder.
+java.evolved  desenleri ve java.evolved'un
+`modern-java` agent skill'i  ile modernize eder.
 
 ## 1. Skill ile hedef tespiti
 
@@ -37,41 +37,6 @@ Skill kurallarına göre:
 | Üretim kodu (Java satırı) | 2589 | 1963 (−%24) |
 | Birim test | 19 (JUnit 4) | 23 (JUnit 6) |
 | `smoke-test.sh` — 30 HTTP senaryosu | referans çıktı | **birebir aynı** |
-
-## 3. Uygulanan java.evolved desenleri
-
-| Alan | Eski | Yeni | java.evolved |
-|---|---|---|---|
-| Model | Getter/setter/equals/hashCode POJO'lar | `record Student`, `Course`, `Enrollment` + compact constructor | [records-for-data-classes](https://javaevolved.dev/tr/language/records-for-data-classes.html), [compact-canonical-constructor](https://javaevolved.dev/tr/language/compact-canonical-constructor.html) |
-| Durum/not | `int` sabitleri, `if/else` zinciri | `enum StudentStatus`, `enum LetterGrade(points)` | [switch-expressions](https://javaevolved.dev/tr/language/switch-expressions.html) |
-| Hatalar | 3 ayrı exception, 3 kopya `catch` | `sealed ApiException` + exhaustive `switch` | [sealed-classes](https://javaevolved.dev/tr/language/sealed-classes.html), [exhaustive-switch](https://javaevolved.dev/tr/language/exhaustive-switch.html) |
-| Hata ctor'u | `super()` öncesi doğrulama yapılamıyordu | Doğrulama ve alan ataması `super()` öncesinde | [flexible-constructor-bodies](https://javaevolved.dev/tr/language/flexible-constructor-bodies.html) |
-| JSON yazıcı | `instanceof` + cast zinciri | Pattern matching `switch`, `case null`, guard'lar | [pattern-matching-switch](https://javaevolved.dev/tr/language/pattern-matching-switch.html), [null-in-switch](https://javaevolved.dev/tr/errors/null-in-switch.html), [guarded-patterns](https://javaevolved.dev/tr/language/guarded-patterns.html) |
-| HTTP yanıtları | `status` değişkeni + dağınık `send` çağrıları | `sealed interface Response` + record pattern'ler | [record-patterns](https://javaevolved.dev/tr/language/record-patterns.html) |
-| Koleksiyonlar | Raw `List`/`Map`, `Hashtable`, `Vector`, `Enumeration` | Generic'ler, `ConcurrentHashMap`, `SequencedMap`, `getFirst()/getLast()` | [raw-collections-to-generics](https://javaevolved.dev/tr/language/raw-collections-to-generics.html), [legacy-synchronized-collections](https://javaevolved.dev/tr/collections/legacy-synchronized-collections.html), [sequenced-collections](https://javaevolved.dev/tr/collections/sequenced-collections.html) |
-| Değişmez listeler | `Collections.unmodifiableList(new ArrayList(...))` | `List.of`, `List.copyOf`, `Stream.toList()` | [immutable-list-creation](https://javaevolved.dev/tr/collections/immutable-list-creation.html), [copying-collections-immutably](https://javaevolved.dev/tr/collections/copying-collections-immutably.html), [stream-tolist](https://javaevolved.dev/tr/streams/stream-tolist.html) |
-| Sayaçlar | `containsKey/get/put` + `new Integer(x+1)` | `Map.merge`, `groupingBy(..., summingInt(_ -> 1))` | [map-compute-and-merge](https://javaevolved.dev/tr/collections/map-compute-and-merge.html), [unnamed-variables](https://javaevolved.dev/tr/language/unnamed-variables.html) |
-| Sıralama | Anonim `Comparator` sınıfları | `Comparator.comparing(...).thenComparing(...).reversed()` | [comparator-factories](https://javaevolved.dev/tr/collections/comparator-factories.html), [anonymous-classes-to-lambdas](https://javaevolved.dev/tr/language/anonymous-classes-to-lambdas.html) |
-| GNO | Iterator döngüsü + `-1.0` sentinel | `mapMulti` + `Collectors.teeing` → `OptionalDouble` | [stream-mapmulti](https://javaevolved.dev/tr/streams/stream-mapmulti.html), [collectors-teeing](https://javaevolved.dev/tr/collections/collectors-teeing.html) |
-| Tarih | `SimpleDateFormat` (thread-safe değil → `synchronized`), `Calendar` | `LocalDate`, katı `DateTimeFormatter`, `Period` | [java-time-basics](https://javaevolved.dev/tr/datetime/java-time-basics.html), [date-formatting](https://javaevolved.dev/tr/datetime/date-formatting.html), [duration-and-period](https://javaevolved.dev/tr/datetime/duration-and-period.html) |
-| Metin | `trim().length()==0`, döngüyle `repeat`, `StringBuffer` birleştirme | `isBlank`, `strip`, `repeat`, text block + `formatted` | [string-isblank](https://javaevolved.dev/tr/strings/string-isblank.html), [string-strip](https://javaevolved.dev/tr/strings/string-strip.html), [string-repeat](https://javaevolved.dev/tr/strings/string-repeat.html), [text-blocks-for-multiline-strings](https://javaevolved.dev/tr/language/text-blocks-for-multiline-strings.html), [string-formatted](https://javaevolved.dev/tr/strings/string-formatted.html) |
-| Locale | `new Locale("tr", "TR")` | `Locale.of("tr", "TR")`, `toUpperCase(Locale.ROOT)` | [locale-of](https://javaevolved.dev/tr/datetime/locale-of.html) |
-| Dosya I/O | `FileReader`/`FileWriter` (platform charset), elle `finally { close }` | `Path.of`, `Files.readAllLines/write(..., UTF_8)`, try-with-resources | [path-of](https://javaevolved.dev/tr/io/path-of.html), [reading-files](https://javaevolved.dev/tr/io/reading-files.html), [explicit-charset-file-io](https://javaevolved.dev/tr/io/explicit-charset-file-io.html), [try-with-resources-effectively-final](https://javaevolved.dev/tr/io/try-with-resources-effectively-final.html) |
-| HTTP gövdesi | `byte[4096]` döngüsü, `URLDecoder.decode(s, "UTF-8")` | `readAllBytes()`, `URLDecoder.decode(s, UTF_8)` | [inputstream-transferto](https://javaevolved.dev/tr/io/inputstream-transferto.html) |
-| Güvenlik | `new Random()` ile API anahtarı, elle hex, `equals` | `SecureRandom`, `HexFormat`, sabit zamanlı `MessageDigest.isEqual` | [strong-random](https://javaevolved.dev/tr/security/strong-random.html), [hex-format](https://javaevolved.dev/tr/datetime/hex-format.html) |
-| Yansıma | `Class.newInstance()` | `asSubclass(...).getDeclaredConstructor().newInstance()` | [class-newinstance-to-constructor](https://javaevolved.dev/tr/tooling/class-newinstance-to-constructor.html) |
-| Kimlik üretimi | `volatile`'sız double-checked locking singleton | Depo başına `AtomicLong` | [lock-free-lazy-init](https://javaevolved.dev/tr/concurrency/lock-free-lazy-init.html) |
-| Bildirim kuyruğu | `LinkedList` + `wait/notify`, yutulan `InterruptedException` | `BlockingQueue`, sanal thread, kooperatif iptal | [wait-notify-to-blocking-queue](https://javaevolved.dev/tr/concurrency/wait-notify-to-blocking-queue.html), [thread-stop-to-cooperative-cancellation](https://javaevolved.dev/tr/concurrency/thread-stop-to-cooperative-cancellation.html) |
-| Uyku | `Thread.sleep(50)` | `Thread.sleep(Duration)` | [thread-sleep-duration](https://javaevolved.dev/tr/concurrency/thread-sleep-duration.html) |
-| Zamanlayıcı | `Timer` + `TimerTask` | `ScheduledExecutorService` + `Duration` | [timer-task-to-scheduled-executor](https://javaevolved.dev/tr/concurrency/timer-task-to-scheduled-executor.html) |
-| HTTP sunucu | `newFixedThreadPool(10)` | `newVirtualThreadPerTaskExecutor()` | [virtual-threads](https://javaevolved.dev/tr/concurrency/virtual-threads.html) |
-| İstek bağlamı | — | `ScopedValue<RequestContext>` (Java 25 final) | [scoped-values](https://javaevolved.dev/tr/concurrency/scoped-values.html) |
-| Null varsayılanları | `x != null ? x : y` | `Objects.requireNonNullElse` | [require-nonnull-else](https://javaevolved.dev/tr/errors/require-nonnull-else.html) |
-| Optional | `null` dönüşleri + kontrol | `Optional` dönüşleri, `orElseThrow` | [optional-orelsethrow](https://javaevolved.dev/tr/errors/optional-orelsethrow.html) |
-| Kullanılmayan değişkenler | `catch (NumberFormatException e)` | `catch (NumberFormatException _)` | [unnamed-variables](https://javaevolved.dev/tr/language/unnamed-variables.html) |
-| Dokümantasyon | `/** HTML javadoc */` | `/// Markdown` yorumları | [markdown-javadoc-comments](https://javaevolved.dev/tr/language/markdown-javadoc-comments.html) |
-| Script | — | `scripts/HealthCheck.java`: compact source file + `import module` + `IO.println` + `HttpClient` | [compact-source-files](https://javaevolved.dev/tr/language/compact-source-files.html), [module-import-declarations](https://javaevolved.dev/tr/language/module-import-declarations.html), [io-class-console-io](https://javaevolved.dev/tr/io/io-class-console-io.html), [http-client](https://javaevolved.dev/tr/io/http-client.html) |
-| Testler | JUnit 4, `@Test(expected=...)`, `try/fail/catch` | JUnit 6, `assertThrows`, `@ParameterizedTest`, sabit `Clock` | [junit6-with-jspecify](https://javaevolved.dev/tr/tooling/junit6-with-jspecify.html) |
 
 ## 4. Bilinçli olarak dokunulmayanlar
 
