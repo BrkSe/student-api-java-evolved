@@ -1,3 +1,5 @@
+Blog Yazısına Ulaş! [java.evolved Nedir? Modern Java Agent Skill ile Java 8 Kodunu Java 25’e Taşımak](https://blog.burakkutbay.com/java-evolved-nedir-eski-java-kodunu-java-25e-tasimak.html/)
+
 # Student API
 
 Öğrenci, ders kaydı, not ve genel not ortalaması (GNO) yönetimi için **hiçbir framework kullanmayan** bir REST API.
@@ -7,8 +9,8 @@
 > `wait`/`notify`, `Timer`, `StringBuffer`, `new Integer(...)`, `Class.newInstance()`, elle yazılmış
 > `try/finally` blokları ve `instanceof` + cast zincirleri...
 >
-> Bu kod tabanı, [java.evolved](https://javaevolved.dev/tr/) desenleri ve java.evolved'un
-> [`modern-java` agent skill'i](https://javaevolved.dev/agent-plugin.html) kullanılarak
+> Bu kod tabanı, java.evolved desenleri ve java.evolved'un
+> `modern-java` agent skill'i kullanılarak
 > modernize edilmiştir. Modern sürüm için **`modernize/java-25`** branch'ine bakın.
 
 ## Özellikler
@@ -33,54 +35,3 @@
 mvn package
 java -jar target/student-api.jar
 ```
-
-Yapılandırma `src/main/resources/application.properties` dosyasındadır ve `-Danahtar=değer` ile ezilebilir:
-
-| Anahtar | Varsayılan | Açıklama |
-|---|---|---|
-| `server.port` | `8080` | HTTP portu |
-| `server.threads` | `10` | İstek işleyen thread sayısı |
-| `api.key` | `dev-secret-key` | Yazma işlemleri için API anahtarı (boşsa rastgele üretilir) |
-| `repository.class` | `FileStudentRepository` | Depo implementasyonu |
-| `repository.file` | `data/students.csv` | CSV veri dosyası |
-| `backup.period.millis` | `60000` | Yedekleme periyodu |
-
-## Uç noktalar
-
-| Metot | Yol | Açıklama |
-|---|---|---|
-| GET | `/api/health` | Sağlık kontrolü |
-| GET | `/api/courses` | Ders kataloğu |
-| GET | `/api/stats` | İstatistikler |
-| GET | `/api/students?department=&status=&sort=id\|name\|gpa\|age` | Listele / filtrele / sırala |
-| POST | `/api/students` | Öğrenci oluştur |
-| GET | `/api/students/{id}` | Öğrenci detayı |
-| PUT | `/api/students/{id}` | Kısmi güncelleme |
-| DELETE | `/api/students/{id}` | Sil (notlu dersi yoksa) |
-| POST | `/api/students/{id}/enrollments` | Derse kaydol |
-| PUT | `/api/students/{id}/enrollments/{courseCode}/grade` | Not gir |
-| GET | `/api/students/{id}/gpa` | GNO özeti |
-| GET | `/api/students/{id}/transcript` | Transkript (text/plain) |
-
-### Örnek
-
-```bash
-curl -X POST http://localhost:8080/api/students \
-  -H "X-API-Key: dev-secret-key" \
-  -d '{"firstName":"ismail","lastName":"KARA","email":"ismail.kara@ogrenci.edu.tr","birthDate":"2004-03-15","department":"Fizik"}'
-
-curl -X POST http://localhost:8080/api/students/9/enrollments \
-  -H "X-API-Key: dev-secret-key" \
-  -d '{"courseCode":"PHYS101","semester":"2025-GUZ"}'
-
-curl http://localhost:8080/api/students/1/transcript
-```
-
-## Testler
-
-```bash
-mvn test                      # birim testleri
-./scripts/smoke-test.sh       # uygulamayı başlatıp tüm uç noktaları çağırır
-```
-
-`smoke-test.sh` çıktısı iki branch arasında davranışın korunduğunu doğrulamak için birebir karşılaştırılabilir.
